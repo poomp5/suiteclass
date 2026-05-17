@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 const COLS = 10;
 const ROWS = 20;
-const POPUP_INTERVAL_MS = 15_000;
+const POPUP_INTERVAL_MS = 10_000;
 const TICK_MS_START = 700;
 const TICK_MS_MIN = 120;
 
@@ -273,7 +273,7 @@ export default function Home() {
       <header className="flex w-full max-w-md items-center justify-between text-white">
         <div className="flex items-baseline gap-2">
           <span className="text-2xl font-black tracking-tight drop-shadow-sm">
-            Block
+            Bogie
           </span>
           <span className="text-2xl font-black tracking-tight text-yellow-200 drop-shadow-sm">
             Drop
@@ -421,26 +421,24 @@ function BogiePopup({
   const [imgFailed, setImgFailed] = useState(false);
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4"
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-sm overflow-hidden rounded-3xl bg-white shadow-2xl"
+        className="relative w-full max-w-sm overflow-hidden rounded-3xl shadow-2xl"
         onClick={(e) => e.stopPropagation()}
+        style={{ background: "#0a0a0a", border: "1px solid #1f1f1f" }}
       >
         <button
           onClick={onClose}
           aria-label="Close"
-          className="absolute right-3 top-3 z-10 grid h-8 w-8 place-items-center rounded-full bg-black/60 text-white hover:bg-black/80"
+          className="absolute right-3 top-3 z-10 grid h-8 w-8 place-items-center rounded-full bg-white/10 text-white hover:bg-white/20"
         >
           ✕
         </button>
         <div
           className="flex aspect-square items-center justify-center"
-          style={{
-            background:
-              "linear-gradient(135deg, #48caea 0%, #5aafff 100%)",
-          }}
+          style={{ background: "#0a0a0a" }}
         >
           {imgFailed ? (
             <div className="px-6 text-center text-white">
@@ -456,7 +454,7 @@ function BogiePopup({
           ) : (
             <Image
               src="/bogieman.png"
-              alt="Bogie"
+              alt="โบกี้แมน"
               width={400}
               height={400}
               className="h-full w-full object-contain"
@@ -466,22 +464,22 @@ function BogiePopup({
             />
           )}
         </div>
-        <div className="p-4 text-center">
-          <div className="text-lg font-black text-slate-800">
-            Bogie says hi! 👋
+        <div className="p-5 text-center">
+          <div className="text-2xl font-black text-white drop-shadow">
+            โบกี้แมนมาแล้ว!!
           </div>
-          <div className="mt-1 text-xs text-slate-500">
-            Popup #{count} · every 15s
+          <div className="mt-1 text-xs text-white/50">
+            Popup #{count} · ทุก 10 วิ
           </div>
           <button
             onClick={onClose}
-            className="mt-3 w-full rounded-full px-5 py-2.5 text-sm font-bold text-white"
+            className="mt-4 w-full rounded-full px-5 py-2.5 text-sm font-bold text-white"
             style={{
-              background:
-                "linear-gradient(135deg, #48caea 0%, #5aafff 100%)",
+              background: "#1f1f1f",
+              border: "1px solid #2f2f2f",
             }}
           >
-            Keep playing
+            เล่นต่อ
           </button>
         </div>
       </div>
