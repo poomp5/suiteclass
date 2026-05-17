@@ -340,26 +340,32 @@ export default function Home() {
       </p>
 
       {(gameOver || paused) && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-6">
-          <div className="w-full max-w-sm rounded-3xl bg-white p-6 text-center shadow-2xl">
-            <div className="text-3xl font-black text-slate-800">
-              {gameOver ? "Game over" : "Paused"}
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/85 p-6">
+          <div
+            className="w-full max-w-sm rounded-3xl p-6 text-center shadow-2xl"
+            style={{ background: "#0a0a0a", border: "1px solid #1f1f1f" }}
+          >
+            <div className="text-3xl font-black text-white">
+              {gameOver ? "คุณแพ้แล้ว" : "หยุดชั่วคราว"}
             </div>
             {gameOver && (
-              <div className="mt-2 text-slate-600">
-                You scored{" "}
-                <span className="font-bold text-slate-900">{score}</span>.
+              <div className="mt-3 text-base text-white/80">
+                &ldquo;โดนโบกี้แมนยึดโทรศัพท์&rdquo;
+                <div className="mt-2 text-sm text-white/50">
+                  คะแนนของคุณ:{" "}
+                  <span className="font-bold text-white">{score}</span>
+                </div>
               </div>
             )}
             <button
               onClick={gameOver ? reset : () => setPaused(false)}
-              className="mt-5 w-full rounded-full px-5 py-3 text-base font-bold text-white shadow-lg"
+              className="mt-5 w-full rounded-full px-5 py-3 text-base font-bold text-white"
               style={{
-                background:
-                  "linear-gradient(135deg, #48caea 0%, #5aafff 100%)",
+                background: "#1f1f1f",
+                border: "1px solid #2f2f2f",
               }}
             >
-              {gameOver ? "Play again" : "Resume"}
+              {gameOver ? "เล่นใหม่" : "เล่นต่อ"}
             </button>
           </div>
         </div>
@@ -411,6 +417,8 @@ function ControlButton({
   );
 }
 
+const CLOSE_CLICKS_REQUIRED = 5;
+
 function BogiePopup({
   count,
   onClose,
@@ -419,20 +427,45 @@ function BogiePopup({
   onClose: () => void;
 }) {
   const [imgFailed, setImgFailed] = useState(false);
+  const [closeClicks, setCloseClicks] = useState(0);
+  const [jitter, setJitter] = useState({ dx: 0, dy: 0 });
+
+  const handleClose = () => {
+    const next = closeClicks + 1;
+    if (next >= CLOSE_CLICKS_REQUIRED) {
+      onClose();
+      return;
+    }
+    setCloseClicks(next);
+    setJitter({
+      dx: Math.round((Math.random() - 0.5) * 30),
+      dy: Math.round((Math.random() - 0.5) * 20),
+    });
+  };
+
+  const closeSize = Math.max(10, 36 - closeClicks * 6);
+  const fontSize = Math.max(8, closeSize * 0.55);
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4"
-      onClick={onClose}
     >
       <div
         className="relative w-full max-w-sm overflow-hidden rounded-3xl shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
         style={{ background: "#0a0a0a", border: "1px solid #1f1f1f" }}
       >
         <button
-          onClick={onClose}
+          onClick={handleClose}
           aria-label="Close"
-          className="absolute right-3 top-3 z-10 grid h-8 w-8 place-items-center rounded-full bg-white/10 text-white hover:bg-white/20"
+          className="absolute z-10 grid place-items-center rounded-full bg-white/10 text-white/70 transition-all duration-150 hover:bg-white/20"
+          style={{
+            top: 12 + jitter.dy,
+            right: 12 + jitter.dx,
+            width: closeSize,
+            height: closeSize,
+            fontSize,
+            lineHeight: 1,
+          }}
         >
           ✕
         </button>
