@@ -1,129 +1,132 @@
 "use client";
 
 import Image from "next/image";
-import {
-  PointerEvent as ReactPointerEvent,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-const BOARD_SIZE = 8;
-const POPUP_INTERVAL_MS = 10_000;
-const TRAY_CELL_PX = 22;
-const DRAG_CELL_PX = 38;
+const COLS = 10;
+const ROWS = 20;
+const POPUP_INTERVAL_MS = 15_000;
+const TICK_MS_START = 700;
+const TICK_MS_MIN = 120;
 
-type Cell = string | null; // null = empty, otherwise = color
+type Cell = string | null;
 type Board = Cell[][];
-type Shape = { id: string; cells: [number, number][]; color: string };
+type Piece = {
+  shape: number[][];
+  color: string;
+  row: number;
+  col: number;
+};
 
-const PALETTE = [
-  "#ff6ec7",
-  "#ffd166",
-  "#06d6a0",
-  "#ef476f",
-  "#a78bfa",
-  "#fb923c",
-  "#22d3ee",
-  "#facc15",
-];
-
-const SHAPE_TEMPLATES: { cells: [number, number][] }[] = [
-  { cells: [[0, 0]] },
-  { cells: [[0, 0], [0, 1]] },
-  { cells: [[0, 0], [1, 0]] },
-  { cells: [[0, 0], [0, 1], [0, 2]] },
-  { cells: [[0, 0], [1, 0], [2, 0]] },
-  { cells: [[0, 0], [0, 1], [1, 0], [1, 1]] },
-  { cells: [[0, 0], [0, 1], [0, 2], [1, 0]] },
-  { cells: [[0, 0], [1, 0], [1, 1], [1, 2]] },
-  { cells: [[0, 0], [0, 1], [1, 1], [1, 2]] },
-  { cells: [[0, 1], [0, 2], [1, 0], [1, 1]] },
-  { cells: [[0, 0], [0, 1], [0, 2], [0, 3]] },
-  { cells: [[0, 0], [1, 0], [2, 0], [3, 0]] },
-  { cells: [[0, 0], [0, 1], [0, 2], [1, 2]] },
-  { cells: [[0, 0], [1, 0], [2, 0], [2, 1]] },
+const PIECES: { shape: number[][]; color: string }[] = [
+  { shape: [[1, 1, 1, 1]], color: "#22d3ee" },
+  { shape: [[1, 1], [1, 1]], color: "#facc15" },
+  { shape: [[0, 1, 0], [1, 1, 1]], color: "#a78bfa" },
+  { shape: [[0, 1, 1], [1, 1, 0]], color: "#06d6a0" },
+  { shape: [[1, 1, 0], [0, 1, 1]], color: "#ef476f" },
+  { shape: [[1, 0, 0], [1, 1, 1]], color: "#5aafff" },
+  { shape: [[0, 0, 1], [1, 1, 1]], color: "#fb923c" },
 ];
 
 const emptyBoard = (): Board =>
-  Array.from({ length: BOARD_SIZE }, () =>
-    Array.from({ length: BOARD_SIZE }, () => null as Cell),
+  Array.from({ length: ROWS }, () =>
+    Array.from({ length: COLS }, () => null as Cell),
   );
 
-const randomShape = (): Shape => {
-  const template =
-    SHAPE_TEMPLATES[Math.floor(Math.random() * SHAPE_TEMPLATES.length)];
+const randomPiece = (): Piece => {
+  const p = PIECES[Math.floor(Math.random() * PIECES.length)];
   return {
-    id: Math.random().toString(36).slice(2),
-    cells: template.cells.map(([r, c]) => [r, c]) as [number, number][],
-    color: PALETTE[Math.floor(Math.random() * PALETTE.length)],
+    shape: p.shape.map((r) => r.slice()),
+    color: p.color,
+    row: 0,
+    col: Math.floor((COLS - p.shape[0].length) / 2),
   };
 };
 
-const newTray = (): Shape[] => [randomShape(), randomShape(), randomShape()];
-
-const shapeBounds = (cells: [number, number][]) => {
-  let maxR = 0;
-  let maxC = 0;
-  for (const [r, c] of cells) {
-    if (r > maxR) maxR = r;
-    if (c > maxC) maxC = c;
+const rotate = (shape: number[][]): number[][] => {
+  const h = shape.length;
+  const w = shape[0].length;
+  const out: number[][] = Array.from({ length: w }, () =>
+    Array.from({ length: h }, () => 0),
+  );
+  for (let r = 0; r < h; r++) {
+    for (let c = 0; c < w; c++) {
+      out[c][h - 1 - r] = shape[r][c];
+    }
   }
-  return { rows: maxR + 1, cols: maxC + 1 };
+  return out;
 };
 
-const canPlace = (board: Board, shape: Shape, row: number, col: number) => {
-  for (const [dr, dc] of shape.cells) {
-    const r = row + dr;
-    const c = col + dc;
-    if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) return false;
-    if (board[r][c] !== null) return false;
-  }
-  return true;
-};
-
-const hasAnyPlacement = (board: Board, shape: Shape) => {
-  for (let r = 0; r < BOARD_SIZE; r++) {
-    for (let c = 0; c < BOARD_SIZE; c++) {
-      if (canPlace(board, shape, r, c)) return true;
+const collides = (
+  board: Board,
+  shape: number[][],
+  row: number,
+  col: number,
+): boolean => {
+  for (let r = 0; r < shape.length; r++) {
+    for (let c = 0; c < shape[0].length; c++) {
+      if (!shape[r][c]) continue;
+      const br = row + r;
+      const bc = col + c;
+      if (br < 0 || br >= ROWS || bc < 0 || bc >= COLS) return true;
+      if (board[br][bc] !== null) return true;
     }
   }
   return false;
 };
 
-type DragState = {
-  shape: Shape;
-  pointerId: number;
-  x: number;
-  y: number;
+const merge = (board: Board, piece: Piece): Board => {
+  const next = board.map((r) => r.slice()) as Board;
+  for (let r = 0; r < piece.shape.length; r++) {
+    for (let c = 0; c < piece.shape[0].length; c++) {
+      if (piece.shape[r][c]) {
+        next[piece.row + r][piece.col + c] = piece.color;
+      }
+    }
+  }
+  return next;
+};
+
+const clearLines = (board: Board): { board: Board; cleared: number } => {
+  const keep = board.filter((row) => row.some((v) => v === null));
+  const cleared = ROWS - keep.length;
+  const filler: Board = Array.from({ length: cleared }, () =>
+    Array.from({ length: COLS }, () => null as Cell),
+  );
+  return { board: [...filler, ...keep], cleared };
 };
 
 export default function Home() {
   const [board, setBoard] = useState<Board>(emptyBoard);
-  const [tray, setTray] = useState<Shape[]>([]);
+  const [piece, setPiece] = useState<Piece | null>(null);
   const [score, setScore] = useState(0);
   const [best, setBest] = useState(0);
-  const [combo, setCombo] = useState(0);
+  const [lines, setLines] = useState(0);
+  const [level, setLevel] = useState(1);
   const [gameOver, setGameOver] = useState(false);
+  const [paused, setPaused] = useState(false);
   const [popupOpen, setPopupOpen] = useState(false);
   const [popupCount, setPopupCount] = useState(0);
-  const [drag, setDrag] = useState<DragState | null>(null);
 
-  const boardRef = useRef<HTMLDivElement>(null);
-  const gridRef = useRef<HTMLDivElement>(null);
+  const boardRef = useRef(board);
+  const pieceRef = useRef(piece);
+  const gameOverRef = useRef(gameOver);
+  const pausedRef = useRef(paused);
+  boardRef.current = board;
+  pieceRef.current = piece;
+  gameOverRef.current = gameOver;
+  pausedRef.current = paused;
 
   useEffect(() => {
-    const stored = window.localStorage.getItem("bb-best");
+    const stored = window.localStorage.getItem("tetris-best");
     if (stored) setBest(Number(stored) || 0);
-    setTray(newTray());
+    setPiece(randomPiece());
   }, []);
 
   useEffect(() => {
     if (score > best) {
       setBest(score);
-      window.localStorage.setItem("bb-best", String(score));
+      window.localStorage.setItem("tetris-best", String(score));
     }
   }, [score, best]);
 
@@ -136,157 +139,135 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (tray.length === 0) return;
-    const stuck = tray.every((s) => !hasAnyPlacement(board, s));
-    if (stuck) setGameOver(true);
-  }, [tray, board]);
+    setLevel(Math.floor(lines / 10) + 1);
+  }, [lines]);
 
-  const hoverCell = useMemo(() => {
-    if (!drag || !gridRef.current) return null;
-    const cells = gridRef.current.children;
-    const c00 = cells[0] as HTMLElement | undefined;
-    const cLast = cells[BOARD_SIZE * BOARD_SIZE - 1] as HTMLElement | undefined;
-    if (!c00 || !cLast) return null;
-    const r00 = c00.getBoundingClientRect();
-    const rLast = cLast.getBoundingClientRect();
-    const strideX = (rLast.left - r00.left) / (BOARD_SIZE - 1);
-    const strideY = (rLast.top - r00.top) / (BOARD_SIZE - 1);
-    if (strideX <= 0 || strideY <= 0) return null;
-    const { cols } = shapeBounds(drag.shape.cells);
-    const pointerCol = (drag.x - (r00.left + r00.width / 2)) / strideX;
-    const pointerRow = (drag.y - (r00.top + r00.height / 2)) / strideY;
-    const col = Math.round(pointerCol - (cols - 1) / 2);
-    const row = Math.round(pointerRow - 1.5);
-    if (row < -2 || row > BOARD_SIZE + 2 || col < -2 || col > BOARD_SIZE + 2) {
-      return null;
-    }
-    return { row, col };
-  }, [drag]);
-
-  const previewValid =
-    drag && hoverCell
-      ? canPlace(board, drag.shape, hoverCell.row, hoverCell.col)
-      : false;
-
-  const previewCells = useMemo(() => {
-    if (!drag || !hoverCell || !previewValid) return new Set<string>();
-    const s = new Set<string>();
-    for (const [dr, dc] of drag.shape.cells) {
-      s.add(`${hoverCell.row + dr}-${hoverCell.col + dc}`);
-    }
-    return s;
-  }, [drag, hoverCell, previewValid]);
-
-  const commitPlace = useCallback(
-    (shape: Shape, row: number, col: number) => {
-      setBoard((cur) => {
-        if (!canPlace(cur, shape, row, col)) return cur;
-        const next = cur.map((r) => r.slice()) as Board;
-        for (const [dr, dc] of shape.cells) {
-          next[row + dr][col + dc] = shape.color;
-        }
-
-        const fullRows: number[] = [];
-        const fullCols: number[] = [];
-        for (let r = 0; r < BOARD_SIZE; r++) {
-          if (next[r].every((v) => v !== null)) fullRows.push(r);
-        }
-        for (let c = 0; c < BOARD_SIZE; c++) {
-          let full = true;
-          for (let r = 0; r < BOARD_SIZE; r++) {
-            if (next[r][c] === null) {
-              full = false;
-              break;
-            }
-          }
-          if (full) fullCols.push(c);
-        }
-
-        const cleared = fullRows.length + fullCols.length;
-        if (cleared > 0) {
-          for (const r of fullRows) {
-            for (let c = 0; c < BOARD_SIZE; c++) next[r][c] = null;
-          }
-          for (const c of fullCols) {
-            for (let r = 0; r < BOARD_SIZE; r++) next[r][c] = null;
-          }
-        }
-
-        const placedPoints = shape.cells.length;
-        const clearPoints = cleared * BOARD_SIZE * 10;
-        const comboBonus = cleared > 1 ? cleared * 20 : 0;
-        setScore((s) => s + placedPoints + clearPoints + comboBonus);
-        setCombo(cleared > 0 ? cleared : 0);
-
-        return next;
-      });
-
-      setTray((cur) => {
-        const next = cur.filter((s) => s.id !== shape.id);
-        return next.length === 0 ? newTray() : next;
-      });
-      return true;
+  const lockAndNext = useCallback(
+    (p: Piece) => {
+      const merged = merge(boardRef.current, p);
+      const { board: cleared, cleared: clearedCount } = clearLines(merged);
+      setBoard(cleared);
+      if (clearedCount > 0) {
+        setLines((n) => n + clearedCount);
+        setScore((s) => s + [0, 100, 300, 500, 800][clearedCount] * level);
+      } else {
+        setScore((s) => s + 10);
+      }
+      const next = randomPiece();
+      if (collides(cleared, next.shape, next.row, next.col)) {
+        setGameOver(true);
+        setPiece(null);
+        return;
+      }
+      setPiece(next);
     },
-    [],
+    [level],
   );
 
-  const startDrag = (
-    e: ReactPointerEvent<HTMLDivElement>,
-    shape: Shape,
-  ) => {
-    if (!hasAnyPlacement(board, shape)) return;
-    e.preventDefault();
-    setDrag({
-      shape,
-      pointerId: e.pointerId,
-      x: e.clientX,
-      y: e.clientY,
-    });
-  };
+  const step = useCallback(() => {
+    const p = pieceRef.current;
+    if (!p || gameOverRef.current || pausedRef.current) return;
+    if (!collides(boardRef.current, p.shape, p.row + 1, p.col)) {
+      setPiece({ ...p, row: p.row + 1 });
+    } else {
+      lockAndNext(p);
+    }
+  }, [lockAndNext]);
 
   useEffect(() => {
-    if (!drag) return;
-    const onMove = (ev: PointerEvent) => {
-      if (ev.pointerId !== drag.pointerId) return;
-      ev.preventDefault();
-      setDrag((d) => (d ? { ...d, x: ev.clientX, y: ev.clientY } : d));
-    };
-    const onUp = (ev: PointerEvent) => {
-      if (ev.pointerId !== drag.pointerId) return;
-      if (hoverCell && previewValid) {
-        commitPlace(drag.shape, hoverCell.row, hoverCell.col);
+    const tickMs = Math.max(TICK_MS_MIN, TICK_MS_START - (level - 1) * 60);
+    const id = window.setInterval(step, tickMs);
+    return () => window.clearInterval(id);
+  }, [step, level]);
+
+  const move = useCallback((dx: number) => {
+    const p = pieceRef.current;
+    if (!p || gameOverRef.current || pausedRef.current) return;
+    if (!collides(boardRef.current, p.shape, p.row, p.col + dx)) {
+      setPiece({ ...p, col: p.col + dx });
+    }
+  }, []);
+
+  const softDrop = useCallback(() => {
+    step();
+  }, [step]);
+
+  const hardDrop = useCallback(() => {
+    const p = pieceRef.current;
+    if (!p || gameOverRef.current || pausedRef.current) return;
+    let r = p.row;
+    while (!collides(boardRef.current, p.shape, r + 1, p.col)) r++;
+    lockAndNext({ ...p, row: r });
+  }, [lockAndNext]);
+
+  const rotatePiece = useCallback(() => {
+    const p = pieceRef.current;
+    if (!p || gameOverRef.current || pausedRef.current) return;
+    const rotated = rotate(p.shape);
+    for (const dx of [0, -1, 1, -2, 2]) {
+      if (!collides(boardRef.current, rotated, p.row, p.col + dx)) {
+        setPiece({ ...p, shape: rotated, col: p.col + dx });
+        return;
       }
-      setDrag(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (gameOver) return;
+      switch (e.key) {
+        case "ArrowLeft":
+          e.preventDefault();
+          move(-1);
+          break;
+        case "ArrowRight":
+          e.preventDefault();
+          move(1);
+          break;
+        case "ArrowDown":
+          e.preventDefault();
+          softDrop();
+          break;
+        case "ArrowUp":
+        case "x":
+        case "X":
+          e.preventDefault();
+          rotatePiece();
+          break;
+        case " ":
+          e.preventDefault();
+          hardDrop();
+          break;
+        case "p":
+        case "P":
+          setPaused((v) => !v);
+          break;
+      }
     };
-    const onCancel = () => setDrag(null);
-    window.addEventListener("pointermove", onMove, { passive: false });
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onCancel);
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onCancel);
-    };
-  }, [drag, hoverCell, previewValid, commitPlace]);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [move, softDrop, rotatePiece, hardDrop, gameOver]);
 
   const reset = () => {
     setBoard(emptyBoard());
-    setTray(newTray());
+    setPiece(randomPiece());
     setScore(0);
-    setCombo(0);
+    setLines(0);
+    setLevel(1);
     setGameOver(false);
-    setDrag(null);
+    setPaused(false);
   };
 
-  const dragBounds = drag ? shapeBounds(drag.shape.cells) : null;
+  const displayBoard = piece ? merge(board, piece) : board;
 
   return (
     <div
-      className="flex flex-1 flex-col items-center justify-start px-4 py-6 sm:py-10"
+      className="flex flex-1 flex-col items-center justify-start px-4 py-4 sm:py-8"
       style={{
         background:
           "linear-gradient(160deg, #48caea 0%, #5aafff 60%, #4a7bd6 100%)",
-        touchAction: drag ? "none" : "auto",
+        minHeight: "100vh",
+        touchAction: "none",
       }}
     >
       <header className="flex w-full max-w-md items-center justify-between text-white">
@@ -295,143 +276,97 @@ export default function Home() {
             Block
           </span>
           <span className="text-2xl font-black tracking-tight text-yellow-200 drop-shadow-sm">
-            Burst
+            Drop
           </span>
         </div>
-        <button
-          onClick={reset}
-          className="rounded-full bg-white/20 px-4 py-1.5 text-sm font-bold text-white backdrop-blur hover:bg-white/30"
-        >
-          New game
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setPaused((v) => !v)}
+            className="rounded-full bg-white/20 px-3 py-1.5 text-sm font-bold text-white backdrop-blur hover:bg-white/30"
+          >
+            {paused ? "Resume" : "Pause"}
+          </button>
+          <button
+            onClick={reset}
+            className="rounded-full bg-white/20 px-3 py-1.5 text-sm font-bold text-white backdrop-blur hover:bg-white/30"
+          >
+            New
+          </button>
+        </div>
       </header>
 
-      <div className="mt-4 grid w-full max-w-md grid-cols-3 gap-2 text-center text-white">
+      <div className="mt-3 grid w-full max-w-md grid-cols-4 gap-2 text-center text-white">
         <Stat label="Score" value={score} />
         <Stat label="Best" value={best} />
-        <Stat label="Combo" value={`×${combo}`} />
+        <Stat label="Lines" value={lines} />
+        <Stat label="Level" value={level} />
       </div>
 
-      <div
-        ref={boardRef}
-        className="mt-5 rounded-3xl bg-white/15 p-3 shadow-2xl backdrop-blur"
-        style={{ touchAction: "none" }}
-      >
+      <div className="mt-4 rounded-2xl bg-white/15 p-2 shadow-2xl backdrop-blur">
         <div
-          ref={gridRef}
-          className="grid gap-1.5"
+          className="grid gap-0.5"
           style={{
-            gridTemplateColumns: `repeat(${BOARD_SIZE}, minmax(0, 1fr))`,
+            gridTemplateColumns: `repeat(${COLS}, minmax(0, 1fr))`,
+            width: "min(92vw, 360px)",
           }}
         >
-          {board.map((row, r) =>
-            row.map((cell, c) => {
-              const key = `${r}-${c}`;
-              const filledColor = cell;
-              const isPreview = previewCells.has(key);
-              const isInvalidHover =
-                drag &&
-                hoverCell &&
-                !previewValid &&
-                drag.shape.cells.some(
-                  ([dr, dc]) =>
-                    hoverCell.row + dr === r && hoverCell.col + dc === c,
-                );
-              const showColor = filledColor
-                ? filledColor
-                : isPreview
-                ? drag!.shape.color
-                : isInvalidHover
-                ? "#ef4444"
-                : null;
-              return (
-                <div
-                  key={key}
-                  className="aspect-square rounded-md transition-colors"
-                  style={{
-                    background: showColor ?? "rgba(255,255,255,0.18)",
-                    boxShadow: showColor
-                      ? "inset 0 -3px 0 rgba(0,0,0,0.18), inset 0 2px 0 rgba(255,255,255,0.35)"
-                      : "inset 0 1px 0 rgba(255,255,255,0.15)",
-                    opacity: isPreview && !filledColor ? 0.7 : 1,
-                  }}
-                />
-              );
-            }),
+          {displayBoard.map((row, r) =>
+            row.map((cell, c) => (
+              <div
+                key={`${r}-${c}`}
+                className="aspect-square rounded-[3px]"
+                style={{
+                  background: cell ?? "rgba(255,255,255,0.12)",
+                  boxShadow: cell
+                    ? "inset 0 -2px 0 rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.35)"
+                    : "inset 0 1px 0 rgba(255,255,255,0.08)",
+                }}
+              />
+            )),
           )}
         </div>
       </div>
 
-      <div
-        className="mt-5 flex w-full max-w-md items-end justify-around rounded-3xl bg-white/15 p-4 backdrop-blur"
-        style={{ touchAction: "none", minHeight: 110 }}
-      >
-        {tray.length === 0 ? (
-          <div className="text-white/80">Loading…</div>
-        ) : (
-          tray.map((shape) => {
-            const isDragging = drag?.shape.id === shape.id;
-            const disabled = !hasAnyPlacement(board, shape);
-            return (
-              <div
-                key={shape.id}
-                onPointerDown={(e) => !disabled && startDrag(e, shape)}
-                className={`cursor-grab touch-none select-none rounded-2xl p-2 ${
-                  disabled ? "opacity-40" : "active:cursor-grabbing"
-                }`}
-                style={{ visibility: isDragging ? "hidden" : "visible" }}
-              >
-                <ShapePreview shape={shape} cellSize={TRAY_CELL_PX} />
-              </div>
-            );
-          })
-        )}
+      <div className="mt-4 grid w-full max-w-md grid-cols-5 gap-2">
+        <ControlButton onPress={() => move(-1)} label="◀" />
+        <ControlButton onPress={rotatePiece} label="⟳" />
+        <ControlButton onPress={softDrop} label="▼" />
+        <ControlButton onPress={() => move(1)} label="▶" />
+        <ControlButton onPress={hardDrop} label="⤓" accent />
       </div>
 
       <p className="mt-3 text-center text-xs text-white/80">
-        Drag a piece onto the board. Fill rows or columns to clear them.
+        Arrows to move · Up/X to rotate · Space to drop · P to pause
       </p>
 
-      {drag && dragBounds && (
-        <div
-          className="pointer-events-none fixed z-30"
-          style={{
-            left: drag.x,
-            top: drag.y,
-            transform: `translate(${-(dragBounds.cols * DRAG_CELL_PX) / 2}px, ${-(dragBounds.rows * DRAG_CELL_PX) - DRAG_CELL_PX * 0.4}px)`,
-          }}
-        >
-          <ShapePreview shape={drag.shape} cellSize={DRAG_CELL_PX} />
-        </div>
-      )}
-
-      {gameOver && (
+      {(gameOver || paused) && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-6">
           <div className="w-full max-w-sm rounded-3xl bg-white p-6 text-center shadow-2xl">
-            <div className="text-3xl font-black text-slate-800">Game over</div>
-            <div className="mt-2 text-slate-600">
-              No more moves. You scored{" "}
-              <span className="font-bold text-slate-900">{score}</span>.
+            <div className="text-3xl font-black text-slate-800">
+              {gameOver ? "Game over" : "Paused"}
             </div>
+            {gameOver && (
+              <div className="mt-2 text-slate-600">
+                You scored{" "}
+                <span className="font-bold text-slate-900">{score}</span>.
+              </div>
+            )}
             <button
-              onClick={reset}
+              onClick={gameOver ? reset : () => setPaused(false)}
               className="mt-5 w-full rounded-full px-5 py-3 text-base font-bold text-white shadow-lg"
               style={{
                 background:
                   "linear-gradient(135deg, #48caea 0%, #5aafff 100%)",
               }}
             >
-              Play again
+              {gameOver ? "Play again" : "Resume"}
             </button>
           </div>
         </div>
       )}
 
       {popupOpen && (
-        <BogiePopup
-          count={popupCount}
-          onClose={() => setPopupOpen(false)}
-        />
+        <BogiePopup count={popupCount} onClose={() => setPopupOpen(false)} />
       )}
     </div>
   );
@@ -439,55 +374,50 @@ export default function Home() {
 
 function Stat({ label, value }: { label: string; value: number | string }) {
   return (
-    <div className="rounded-2xl bg-white/15 px-3 py-2 backdrop-blur">
-      <div className="text-[10px] font-bold uppercase tracking-widest opacity-80">
+    <div className="rounded-2xl bg-white/15 px-2 py-2 backdrop-blur">
+      <div className="text-[9px] font-bold uppercase tracking-widest opacity-80">
         {label}
       </div>
-      <div className="text-xl font-black tabular-nums">{value}</div>
+      <div className="text-lg font-black tabular-nums text-white">{value}</div>
     </div>
   );
 }
 
-function ShapePreview({
-  shape,
-  cellSize,
+function ControlButton({
+  onPress,
+  label,
+  accent,
 }: {
-  shape: Shape;
-  cellSize: number;
+  onPress: () => void;
+  label: string;
+  accent?: boolean;
 }) {
-  const { rows, cols } = shapeBounds(shape.cells);
-  const filled = new Set(shape.cells.map(([r, c]) => `${r}-${c}`));
   return (
-    <div
-      className="grid"
+    <button
+      onPointerDown={(e) => {
+        e.preventDefault();
+        onPress();
+      }}
+      className="select-none rounded-2xl py-4 text-2xl font-black text-white shadow-lg active:scale-95"
       style={{
-        gridTemplateColumns: `repeat(${cols}, ${cellSize}px)`,
-        gridTemplateRows: `repeat(${rows}, ${cellSize}px)`,
-        gap: Math.max(2, Math.round(cellSize * 0.1)),
+        background: accent
+          ? "linear-gradient(135deg, #ffd166 0%, #fb923c 100%)"
+          : "rgba(255,255,255,0.25)",
+        backdropFilter: "blur(8px)",
       }}
     >
-      {Array.from({ length: rows }).map((_, r) =>
-        Array.from({ length: cols }).map((__, c) => {
-          const on = filled.has(`${r}-${c}`);
-          return (
-            <div
-              key={`${r}-${c}`}
-              className="rounded-md"
-              style={{
-                background: on ? shape.color : "transparent",
-                boxShadow: on
-                  ? "inset 0 -3px 0 rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.4)"
-                  : undefined,
-              }}
-            />
-          );
-        }),
-      )}
-    </div>
+      {label}
+    </button>
   );
 }
 
-function BogiePopup({ count, onClose }: { count: number; onClose: () => void }) {
+function BogiePopup({
+  count,
+  onClose,
+}: {
+  count: number;
+  onClose: () => void;
+}) {
   const [imgFailed, setImgFailed] = useState(false);
   return (
     <div
@@ -538,10 +468,10 @@ function BogiePopup({ count, onClose }: { count: number; onClose: () => void }) 
         </div>
         <div className="p-4 text-center">
           <div className="text-lg font-black text-slate-800">
-            Bogie Man
+            Bogie says hi! 👋
           </div>
           <div className="mt-1 text-xs text-slate-500">
-            โดนไปดิ #{count} ครั้ง
+            Popup #{count} · every 15s
           </div>
           <button
             onClick={onClose}
@@ -551,7 +481,7 @@ function BogiePopup({ count, onClose }: { count: number; onClose: () => void }) 
                 "linear-gradient(135deg, #48caea 0%, #5aafff 100%)",
             }}
           >
-            สู้ต่อ
+            Keep playing
           </button>
         </div>
       </div>
